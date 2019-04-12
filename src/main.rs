@@ -1,4 +1,6 @@
 extern crate amethyst;
+#[macro_use]
+extern crate log;
 
 use amethyst::{
     prelude::*,
@@ -6,17 +8,39 @@ use amethyst::{
     utils::application_root_dir,
 };
 
+use std::env;
+use std::fs;
+use std::io;
+use std::path::PathBuf;
+
+fn get_gltf_file() -> io::Result<PathBuf> {
+    match env::args().skip(1).next() {
+        Some(fp) => fs::canonicalize(fp),
+        None => Err(io::Error::new(
+            io::ErrorKind::Other,
+            "No file path specified.",
+        )),
+    }
+}
+
 struct Example;
 
 impl SimpleState for Example {}
 
 fn main() -> amethyst::Result<()> {
-    amethyst::start_logger(Default::default());
+    amethyst::Logger::from_config(amethyst::LoggerConfig {
+        level_filter: amethyst::LogLevelFilter::Info,
+        ..Default::default()
+    })
+    .level_for("gfx_device_gl", amethyst::LogLevelFilter::Warn)
+    .level_for("dream78", amethyst::LogLevelFilter::Debug)
+    .start();
 
-    let path = format!(
-        "{}/resources/display_config.ron",
-        application_root_dir()
-    );
+    let fp = get_gltf_file().expect("glTF file missing or invalid");
+
+    debug!("Loading `{}`", fp.display());
+
+    let path = format!("{}/resources/display_config.ron", application_root_dir());
     let config = DisplayConfig::load(&path);
 
     let pipe = Pipeline::build().with_stage(
