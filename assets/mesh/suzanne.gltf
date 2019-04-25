@@ -15,17 +15,22 @@
     "nodes" : [
         {
             "mesh" : 0,
-            "name" : "Suzanne",
-            "scale" : [
-                8.161922454833984,
-                8.161922454833984,
-                8.161922454833984
-            ],
-            "translation" : [
-                -8.047317504882812,
-                3.1473960876464844,
-                17.27986717224121
-            ]
+            "name" : "Suzanne"
+        }
+    ],
+    "materials" : [
+        {
+            "name" : "Material",
+            "pbrMetallicRoughness" : {
+                "baseColorFactor" : [
+                    0.7097931504249573,
+                    0.8000000715255737,
+                    0.10669633746147156,
+                    1
+                ],
+                "metallicFactor" : 0,
+                "roughnessFactor" : 0.5
+            }
         }
     ],
     "meshes" : [
@@ -38,7 +43,8 @@
                         "NORMAL" : 1,
                         "TEXCOORD_0" : 2
                     },
-                    "indices" : 3
+                    "indices" : 3,
+                    "material" : 0
                 }
             ]
         }
