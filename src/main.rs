@@ -1,26 +1,33 @@
-extern crate amethyst;
+use amethyst::gltf::{GltfSceneAsset, GltfSceneFormat, GltfSceneLoaderSystem};
 use amethyst::{
     animation::{
         get_animation_set, AnimationBundle, AnimationCommand, AnimationControlSet, AnimationSet,
         EndControl, VertexSkinningBundle,
     },
     assets::{
-        AssetPrefab, Completion, Handle, Prefab, PrefabData, PrefabError, PrefabLoader,
-        PrefabLoaderSystem, ProgressCounter, RonFormat,
+        AssetPrefab, Completion, Handle, Prefab, PrefabData, PrefabLoader, PrefabLoaderSystem,
+        ProgressCounter, RonFormat,
     },
     controls::{ControlTagPrefab, FlyControlBundle},
     core::transform::{Transform, TransformBundle},
-    ecs::prelude::{Entity, ReadStorage, Write, WriteStorage},
-    input::{is_close_requested, is_key_down},
+    derive::PrefabData,
+    ecs::{Entity, ReadStorage, Write, WriteStorage},
+    input::{is_close_requested, is_key_down, StringBindings, VirtualKeyCode},
     prelude::*,
-    renderer::{CameraPrefab, DrawPbmSeparate, LightPrefab, VirtualKeyCode},
+    renderer::{
+        camera::CameraPrefab,
+        light::LightPrefab,
+        plugins::{RenderPbr3D, RenderSkybox, RenderToWindow},
+        types::DefaultBackend,
+        RenderingBundle,
+    },
     utils::{
         application_root_dir,
+        auto_fov::AutoFovSystem,
         tag::{Tag, TagFinder},
     },
 };
-use amethyst_derive::PrefabData;
-use amethyst_gltf::{GltfSceneAsset, GltfSceneFormat, GltfSceneLoaderSystem};
+
 use serde::{Deserialize, Serialize};
 
 use std::env;
@@ -41,16 +48,26 @@ fn get_gltf_file() -> io::Result<PathBuf> {
 #[derive(Clone, Serialize, Deserialize)]
 struct AnimationMarker;
 
-#[derive(Default, Deserialize, Serialize, PrefabData)]
-#[serde(default)]
-struct ScenePrefabData {
-    transform: Option<Transform>,
-    gltf: Option<AssetPrefab<GltfSceneAsset, GltfSceneFormat>>,
-    camera: Option<CameraPrefab>,
-    light: Option<LightPrefab>,
-    tag: Option<Tag<AnimationMarker>>,
-    fly_tag: Option<ControlTagPrefab>,
+mod prefab {
+    use super::*;
+
+    // This needs to be in scope for the PrefabData derive to work.
+    // Isolating this import is why I put this struct in a module.
+    use amethyst::Error;
+
+    #[derive(Default, Deserialize, Serialize, PrefabData)]
+    #[serde(default)]
+    pub(crate) struct ScenePrefabData {
+        transform: Option<Transform>,
+        gltf: Option<AssetPrefab<GltfSceneAsset, GltfSceneFormat>>,
+        camera: Option<CameraPrefab>,
+        light: Option<LightPrefab>,
+        tag: Option<Tag<AnimationMarker>>,
+        fly_tag: Option<ControlTagPrefab>,
+    }
 }
+
+use prefab::ScenePrefabData;
 
 #[derive(Default)]
 struct Scene {
@@ -76,7 +93,6 @@ impl SimpleState for Example {
                 scene.handle = Some(loader.load(
                     "suzanne_scene.ron",
                     RonFormat,
-                    (),
                     self.progress.as_mut().unwrap(),
                 ));
             },
@@ -185,11 +201,12 @@ fn main() -> amethyst::Result<()> {
         .level_for("dream78", amethyst::LogLevelFilter::Debug)
         .start();
 
-    let app_root: PathBuf = application_root_dir().into();
+    let app_root: PathBuf = application_root_dir()?;
     let resources_directory = app_root.join("assets/");
     let display_conf = app_root.join("resources/display_config.ron");
 
     let game_data = GameDataBuilder::default()
+        .with(AutoFovSystem::default(), "auto_fov", &[])
         .with(
             PrefabLoaderSystem::<ScenePrefabData>::default(),
             "scene_loader",
@@ -200,13 +217,12 @@ fn main() -> amethyst::Result<()> {
             "gltf_loader",
             &["scene_loader"], // This is important so that entity instantiation is performed in a single frame.
         )
-        .with_basic_renderer(display_conf, DrawPbmSeparate::new(), false)?
         .with_bundle(
             AnimationBundle::<usize, Transform>::new("animation_control", "sampler_interpolation")
                 .with_dep(&["gltf_loader"]),
         )?
         .with_bundle(
-            FlyControlBundle::<String, String>::new(None, None, None)
+            FlyControlBundle::<StringBindings>::new(None, None, None)
                 .with_sensitivity(0.1, 0.1)
                 .with_speed(5.),
         )?
@@ -219,7 +235,13 @@ fn main() -> amethyst::Result<()> {
             "transform_system",
             "animation_control",
             "sampler_interpolation",
-        ]))?;
+        ]))?
+        .with_bundle(
+            RenderingBundle::<DefaultBackend>::new()
+                .with_plugin(RenderToWindow::from_config_path(display_conf))
+                .with_plugin(RenderPbr3D::default().with_skinning())
+                .with_plugin(RenderSkybox::default()),
+        )?;
 
     let mut game = Application::build(resources_directory, Example::default())?.build(game_data)?;
     game.run();

@@ -11,7 +11,7 @@ serde = "1.0.90"
 [dependencies.amethyst]
 version = "0.12.*"
 default-features = false
-features = ["animation", "renderer", "gltf"]
+features = ["animation", "gltf"]
 
 [features]
 default = ["vulkan"]
