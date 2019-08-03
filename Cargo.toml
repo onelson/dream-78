@@ -5,8 +5,15 @@ authors = []
 edition = "2018"
 
 [dependencies]
-amethyst = "0.10.0"
-amethyst_gltf = "0.5.0"
-amethyst_derive = "0.3.0"
 log = "0.4.6"
 serde = "1.0.90"
+
+[dependencies.amethyst]
+version = "0.12.*"
+default-features = false
+features = ["animation", "gltf"]
+
+[features]
+default = ["vulkan"]
+vulkan = ["amethyst/vulkan"]
+metal = ["amethyst/metal"]
