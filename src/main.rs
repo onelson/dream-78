@@ -1,42 +1,27 @@
-use amethyst::gltf::{GltfSceneAsset, GltfSceneFormat, GltfSceneLoaderSystem};
 use amethyst::{
-    animation::{
-        get_animation_set, AnimationBundle, AnimationCommand, AnimationControlSet, AnimationSet,
-        EndControl, VertexSkinningBundle,
-    },
-    assets::{
-        AssetPrefab, Completion, Handle, Prefab, PrefabData, PrefabLoader, PrefabLoaderSystem,
-        ProgressCounter, RonFormat,
-    },
-    controls::{ControlTagPrefab, FlyControlBundle},
+    animation::{AnimationBundle, VertexSkinningBundle},
+    assets::PrefabLoaderSystem,
+    controls::FlyControlBundle,
     core::transform::{Transform, TransformBundle},
-    derive::PrefabData,
-    ecs::{Entity, ReadStorage, Write, WriteStorage},
-    input::{is_close_requested, is_key_down, StringBindings, VirtualKeyCode},
+    gltf::GltfSceneLoaderSystem,
+    input::StringBindings,
     prelude::*,
     renderer::{
-        camera::CameraPrefab,
-        light::LightPrefab,
         plugins::{RenderPbr3D, RenderSkybox, RenderToWindow},
         types::DefaultBackend,
         RenderingBundle,
     },
-    utils::{
-        application_root_dir,
-        auto_fov::AutoFovSystem,
-        tag::{Tag, TagFinder},
-    },
+    utils::{application_root_dir, auto_fov::AutoFovSystem},
 };
-
-use serde::{Deserialize, Serialize};
 
 use std::env;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
 
+#[allow(dead_code)]
 fn get_gltf_file() -> io::Result<PathBuf> {
-    match env::args().skip(1).next() {
+    match env::args().nth(1) {
         Some(fp) => fs::canonicalize(fp),
         None => Err(io::Error::new(
             io::ErrorKind::Other,
@@ -44,156 +29,10 @@ fn get_gltf_file() -> io::Result<PathBuf> {
         )),
     }
 }
-
-#[derive(Clone, Serialize, Deserialize)]
-struct AnimationMarker;
-
-mod prefab {
-    use super::*;
-
-    // This needs to be in scope for the PrefabData derive to work.
-    // Isolating this import is why I put this struct in a module.
-    use amethyst::Error;
-
-    #[derive(Default, Deserialize, Serialize, PrefabData)]
-    #[serde(default)]
-    pub(crate) struct ScenePrefabData {
-        transform: Option<Transform>,
-        gltf: Option<AssetPrefab<GltfSceneAsset, GltfSceneFormat>>,
-        camera: Option<CameraPrefab>,
-        light: Option<LightPrefab>,
-        tag: Option<Tag<AnimationMarker>>,
-        fly_tag: Option<ControlTagPrefab>,
-    }
-}
-
+mod prefab;
+mod state;
 use prefab::ScenePrefabData;
-
-#[derive(Default)]
-struct Scene {
-    handle: Option<Handle<Prefab<ScenePrefabData>>>,
-    animation_index: usize,
-}
-
-#[derive(Default)]
-struct Example {
-    entity: Option<Entity>,
-    initialised: bool,
-    progress: Option<ProgressCounter>,
-}
-
-impl SimpleState for Example {
-    fn on_start(&mut self, data: StateData<'_, GameData<'_, '_>>) {
-        let StateData { world, .. } = data;
-
-        self.progress = Some(ProgressCounter::default());
-
-        world.exec(
-            |(loader, mut scene): (PrefabLoader<'_, ScenePrefabData>, Write<'_, Scene>)| {
-                scene.handle = Some(loader.load(
-                    "suzanne_scene.ron",
-                    RonFormat,
-                    self.progress.as_mut().unwrap(),
-                ));
-            },
-        );
-    }
-
-    fn handle_event(
-        &mut self,
-        data: StateData<'_, GameData<'_, '_>>,
-        event: StateEvent,
-    ) -> SimpleTrans {
-        let StateData { world, .. } = data;
-        if let StateEvent::Window(event) = &event {
-            if is_close_requested(&event) || is_key_down(&event, VirtualKeyCode::Escape) {
-                Trans::Quit
-            } else if is_key_down(&event, VirtualKeyCode::Space) {
-                toggle_or_cycle_animation(
-                    self.entity,
-                    &mut world.write_resource(),
-                    &world.read_storage(),
-                    &mut world.write_storage(),
-                );
-                Trans::None
-            } else {
-                Trans::None
-            }
-        } else {
-            Trans::None
-        }
-    }
-
-    fn update(&mut self, data: &mut StateData<'_, GameData<'_, '_>>) -> SimpleTrans {
-        if !self.initialised {
-            let remove = match self.progress.as_ref().map(|p| p.complete()) {
-                None | Some(Completion::Loading) => false,
-
-                Some(Completion::Complete) => {
-                    let scene_handle = data
-                        .world
-                        .read_resource::<Scene>()
-                        .handle
-                        .as_ref()
-                        .unwrap()
-                        .clone();
-
-                    data.world.create_entity().with(scene_handle).build();
-
-                    true
-                }
-
-                Some(Completion::Failed) => {
-                    println!("Error: {:?}", self.progress.as_ref().unwrap().errors());
-                    return Trans::Quit;
-                }
-            };
-            if remove {
-                self.progress = None;
-            }
-            if self.entity.is_none() {
-                if let Some(entity) = data
-                    .world
-                    .exec(|finder: TagFinder<'_, AnimationMarker>| finder.find())
-                {
-                    self.entity = Some(entity);
-                    self.initialised = true;
-                }
-            }
-        }
-        Trans::None
-    }
-}
-
-fn toggle_or_cycle_animation(
-    entity: Option<Entity>,
-    scene: &mut Scene,
-    sets: &ReadStorage<'_, AnimationSet<usize, Transform>>,
-    controls: &mut WriteStorage<'_, AnimationControlSet<usize, Transform>>,
-) {
-    if let Some((entity, Some(animations))) = entity.map(|entity| (entity, sets.get(entity))) {
-        if animations.animations.len() > scene.animation_index {
-            let animation = animations.animations.get(&scene.animation_index).unwrap();
-            let set = get_animation_set::<usize, Transform>(controls, entity).unwrap();
-            if set.has_animation(scene.animation_index) {
-                set.toggle(scene.animation_index);
-            } else {
-                println!("Running animation {}", scene.animation_index);
-                set.add_animation(
-                    scene.animation_index,
-                    animation,
-                    EndControl::Normal,
-                    1.0,
-                    AnimationCommand::Start,
-                );
-            }
-            scene.animation_index += 1;
-            if scene.animation_index >= animations.animations.len() {
-                scene.animation_index = 0;
-            }
-        }
-    }
-}
+use state::Example;
 
 fn main() -> amethyst::Result<()> {
     amethyst::Logger::from_config(Default::default())
